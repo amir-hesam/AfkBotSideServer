@@ -146,32 +146,33 @@ def write_instance_files(bot: BotProcess, req: StartBotRequest):
     login_name = req.mc_username if (req.mc_username and req.mc_username != "-") else f"acc_{bot.account_id}"
     ini_content = f"""[Main]
 [Main.General]
-account = {{ login = "{toml_escape(login_name)}", password = "" }}
-server = {{ host = "{toml_escape(SERVER_HOST)}" }}
-account_type = "microsoft"
-method = "mcc"
+Account = {{ Login = "{toml_escape(login_name)}", Password = "" }}
+Server = {{ Host = "{toml_escape(SERVER_HOST)}" }}
+AccountType = "microsoft"
+Method = "mcc"
 
 [Main.Advanced]
-language = "en_US"
-bot_owners = []
-internal_cmd_char = "slash"
-terrain_and_movements = true
-entity_handling = true
-inventory_handling = true
-auto_respawn = true
-exit_on_failure = true
+EnableSentry = false
+Language = "en_us"
+BotOwners = []
+InternalCmdChar = "slash"
+TerrainAndMovements = true
+EntityHandling = true
+InventoryHandling = true
+AutoRespawn = true
+ExitOnFailure = true
 
 [Main.Proxy]
-enabled = {proxy_enabled}
-proxy_type = "{toml_escape(proxy.type)}"
-server = {{ host = "{toml_escape(proxy.host)}", port = {proxy.port} }}
-username = "{toml_escape(proxy.username)}"
-password = "{toml_escape(proxy.password)}"
+Enabled = {proxy_enabled}
+ProxyType = "{toml_escape(proxy.type)}"
+Server = {{ Host = "{toml_escape(proxy.host)}", Port = {proxy.port} }}
+Username = "{toml_escape(proxy.username)}"
+Password = "{toml_escape(proxy.password)}"
 
 [ChatBot.ScriptScheduler]
-enabled = true
-tasks = [
-    {{ trigger_on_login = true, script = "DonutBotController.cs" }}
+Enabled = true
+Tasks = [
+    {{ TriggerOnLogin = true, Script = "DonutBotController.cs" }}
 ]
 """
     (d / "MinecraftClient.ini").write_text(ini_content, encoding="utf-8")
