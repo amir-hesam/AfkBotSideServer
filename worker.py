@@ -186,85 +186,109 @@ async def send_stdin(bot: BotProcess, line: str):
 
 async def read_mcc_output(bot: BotProcess):
     assert bot.proc and bot.proc.stdout
-    try:
-        while True:
-            raw = await bot.proc.stdout.readline()
-            if not raw:
-                break
-            line = strip_ansi(raw.decode("utf-8", errors="replace")).strip()
-            if not line:
-                continue
-            bot.logs.append(line)
+    buf = ""
+    sent_login_choice = False
 
-            # 0. Auto-answer MCC interactive login method prompt if shown
-            if "Select a login method" in line:
-                try:
-                    await send_stdin(bot, "2")
-                except Exception:
-                    pass
-                continue
+    async def process_line(line: str):
+        nonlocal sent_login_choice
+        if not line:
+            return
+        bot.logs.append(line)
 
-            # 1. Microsoft Device Code / OAuth URL detection
-            if "microsoft.com/link" in line or "devicelogin" in line or "login.microsoftonline.com" in line:
-                url_m = re.search(r"(https://[^\s]+)", line)
-                if url_m:
-                    bot.device_url = url_m.group(1)
-                    bot.status = "auth_pending"
-                    if "login.microsoftonline.com" in bot.device_url and not bot.device_code:
-                        bot.device_code = "OPEN-LINK"
-                        asyncio.create_task(
-                            send_webhook(
-                                {
-                                    "account_id": bot.account_id,
-                                    "event": "device_code",
-                                    "device_url": bot.device_url,
-                                    "device_code": bot.device_code,
-                                }
-                            )
-                        )
+        # 0. Auto-answer MCC interactive login method prompt
+        if not sent_login_choice and "Select a login method" in line:
+            sent_login_choice = True
+            try:
+                await send_stdin(bot, "2")
+            except Exception:
+                pass
+            return
 
-            code_m = re.search(r"(?:enter the code|user code|code[:\s]+)\s*([A-Z0-9-]{6,12})", line, re.IGNORECASE)
-            if code_m:
-                bot.device_code = code_m.group(1)
+        # 1. Microsoft Device Code / OAuth URL detection
+        if "microsoft.com/link" in line or "devicelogin" in line or "login.microsoftonline.com" in line:
+            url_m = re.search(r"(https://[^\s]+)", line)
+            if url_m:
+                bot.device_url = url_m.group(1)
                 bot.status = "auth_pending"
+
+        code_m = re.search(r"(?:enter the code|user code|code)[:\s]+([A-Z0-9]{6,10})", line)
+        if code_m:
+            bot.device_code = code_m.group(1)
+            bot.status = "auth_pending"
+            asyncio.create_task(
+                send_webhook(
+                    {
+                        "account_id": bot.account_id,
+                        "event": "device_code",
+                        "device_url": bot.device_url or "https://www.microsoft.com/link",
+                        "device_code": bot.device_code,
+                    }
+                )
+            )
+        elif bot.device_url and "login.microsoftonline.com" in bot.device_url and not bot.device_code:
+            bot.device_code = "OPEN-LINK"
+            asyncio.create_task(
+                send_webhook(
+                    {
+                        "account_id": bot.account_id,
+                        "event": "device_code",
+                        "device_url": bot.device_url,
+                        "device_code": bot.device_code,
+                    }
+                )
+            )
+
+        # 2. Online detection
+        if "Server was successfully joined" in line or "You have joined" in line or "ChatBot initialized" in line:
+            bot.status = "online"
+            bot.device_code = None
+            bot.device_url = None
+            asyncio.create_task(
+                send_webhook({"account_id": bot.account_id, "event": "status", "status": "online"})
+            )
+
+        # 3. Structured ChatBot events
+        if "[DONUT_EVENT]" in line:
+            idx = line.find("[DONUT_EVENT]") + len("[DONUT_EVENT]")
+            try:
+                ev = json.loads(line[idx:])
                 asyncio.create_task(
                     send_webhook(
                         {
                             "account_id": bot.account_id,
-                            "event": "device_code",
-                            "device_url": bot.device_url or "https://www.microsoft.com/link",
-                            "device_code": bot.device_code,
+                            "event": "chat",
+                            "chat_type": ev.get("type", "info"),
+                            "sender": ev.get("sender", ""),
+                            "message": ev.get("message", ""),
                         }
                     )
                 )
+            except json.JSONDecodeError:
+                pass
 
-            # 2. Online detection
-            if "Server was successfully joined" in line or "You have joined" in line or "ChatBot initialized" in line:
-                bot.status = "online"
-                bot.device_code = None
-                bot.device_url = None
-                asyncio.create_task(
-                    send_webhook({"account_id": bot.account_id, "event": "status", "status": "online"})
-                )
+    try:
+        while True:
+            chunk = await bot.proc.stdout.read(1024)
+            if not chunk:
+                if buf.strip():
+                    await process_line(strip_ansi(buf).strip())
+                break
+            buf += chunk.decode("utf-8", errors="replace")
 
-            # 3. Structured ChatBot events
-            if "[DONUT_EVENT]" in line:
-                idx = line.find("[DONUT_EVENT]") + len("[DONUT_EVENT]")
-                try:
-                    ev = json.loads(line[idx:])
-                    asyncio.create_task(
-                        send_webhook(
-                            {
-                                "account_id": bot.account_id,
-                                "event": "chat",
-                                "chat_type": ev.get("type", "info"),
-                                "sender": ev.get("sender", ""),
-                                "message": ev.get("message", ""),
-                            }
-                        )
-                    )
-                except json.JSONDecodeError:
-                    pass
+            # Process complete lines (\r or \n) AND check partial buffer for prompts without newline
+            parts = re.split(r"[\r\n]+", buf)
+            buf = parts.pop()
+            for p in parts:
+                await process_line(strip_ansi(p).strip())
+
+            clean_tail = strip_ansi(buf).strip()
+            if clean_tail and (
+                "Select a login method" in clean_tail
+                or "enter the code:" in clean_tail
+                or "microsoft.com/link" in clean_tail
+            ):
+                await process_line(clean_tail)
+                buf = ""
 
         rc = await bot.proc.wait()
         if not bot.manual_stop:
