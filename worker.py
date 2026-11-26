@@ -143,9 +143,10 @@ def write_instance_files(bot: BotProcess, req: StartBotRequest):
     # Write MinecraftClient.ini
     proxy = req.proxy or ProxyConfig()
     proxy_enabled = "true" if proxy.enabled and proxy.host and proxy.port else "false"
+    login_name = req.mc_username if (req.mc_username and req.mc_username != "-") else f"acc_{bot.account_id}"
     ini_content = f"""[Main]
 [Main.General]
-account = {{ login = "{toml_escape(req.mc_username)}", password = "" }}
+account = {{ login = "{toml_escape(login_name)}", password = "" }}
 server = {{ host = "{toml_escape(SERVER_HOST)}" }}
 account_type = "microsoft"
 method = "mcc"
@@ -194,6 +195,14 @@ async def read_mcc_output(bot: BotProcess):
             if not line:
                 continue
             bot.logs.append(line)
+
+            # 0. Auto-answer MCC interactive login method prompt if shown
+            if "Select a login method" in line:
+                try:
+                    await send_stdin(bot, "2")
+                except Exception:
+                    pass
+                continue
 
             # 1. Microsoft Device Code / OAuth URL detection
             if "microsoft.com/link" in line or "devicelogin" in line or "login.microsoftonline.com" in line:
