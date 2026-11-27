@@ -14,7 +14,7 @@ INSTALL_DIR="/opt/donut-afk"
 MCC_DIR="$INSTALL_DIR/mcc"
 INSTANCES_DIR="$INSTALL_DIR/instances"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || pwd)"
-REPO_RAW="${REPO_RAW:-https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main}"
+REPO_RAW="${REPO_RAW:-https://raw.githubusercontent.com/amir-hesam/AfkBotSideServer/main}"
 
 # 1. Create 2GB Swap if not present (critical for 1GB RAM VPS)
 if ! swapon --show | grep -q '/swapfile'; then
