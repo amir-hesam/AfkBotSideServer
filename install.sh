@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo "=========================================="
-echo "  DonutSMP AFK Bot - VPS Worker Installer "
-echo "  Target: Ubuntu 22.04 (1 Core / 1GB RAM) "
-echo "=========================================="
+echo "=================================================="
+echo "  DonutSMP AFK Bot - Easy VPS Installer (Ubuntu)  "
+echo "=================================================="
 
 if [ "$EUID" -ne 0 ]; then
-  echo "Please run as root (sudo bash install.sh)"
+  echo "Please run as root: sudo bash install.sh"
   exit 1
 fi
 
@@ -24,54 +23,73 @@ if ! swapon --show | grep -q '/swapfile'; then
   mkswap /swapfile
   swapon /swapfile
   echo '/swapfile none swap sw 0 0' >> /etc/fstab
-  sysctl vm.swappiness=10
+  sysctl vm.swappiness=10 >/dev/null
   echo 'vm.swappiness=10' >> /etc/sysctl.conf
 else
   echo "[1/6] Swap already configured, skipping."
 fi
 
-# 2. Install system dependencies
+# 2. Wait for any background apt lock and install dependencies
 echo "[2/6] Installing system packages..."
+while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
+  echo "Waiting for background apt/unattended-upgrades to finish..."
+  sleep 3
+done
 apt-get update -y
 apt-get install -y curl wget python3 python3-venv python3-pip libicu-dev ca-certificates
 
-# 3. Install Minecraft Console Client (MCC) official Linux x64 binary
+# 3. Install Minecraft Console Client (MCC)
 echo "[3/6] Installing Minecraft Console Client (MCC)..."
 mkdir -p "$MCC_DIR" "$INSTANCES_DIR"
 cd "$MCC_DIR"
 curl -fsSL https://mccteam.github.io/install.sh | sh
-# Ensure binary is executable regardless of name (MinecraftClient or Mcc.Cli)
 chmod +x "$MCC_DIR"/* || true
 
-# 4. Copy worker files
+# 4. Copy worker files and strip CRLF
 echo "[4/6] Setting up Python Worker API..."
 cp "$SCRIPT_DIR/worker.py" "$INSTALL_DIR/worker.py"
 cp "$SCRIPT_DIR/DonutBotController.cs" "$INSTALL_DIR/DonutBotController.cs"
 cp "$SCRIPT_DIR/requirements.txt" "$INSTALL_DIR/requirements.txt"
+sed -i 's/\r$//' "$INSTALL_DIR/worker.py" "$INSTALL_DIR/DonutBotController.cs" "$INSTALL_DIR/requirements.txt"
 
-python3 -m venv "$INSTALL_DIR/venv"
-"$INSTALL_DIR/venv/bin/pip" install --upgrade pip
-"$INSTALL_DIR/venv/bin/pip" install -r "$INSTALL_DIR/requirements.txt"
+if [ ! -d "$INSTALL_DIR/venv" ]; then
+  python3 -m venv "$INSTALL_DIR/venv"
+fi
+"$INSTALL_DIR/venv/bin/pip" install --upgrade pip -q
+"$INSTALL_DIR/venv/bin/pip" install -r "$INSTALL_DIR/requirements.txt" -q
 
-# 5. Create config.env if not exists
+# 5. Create or update config.env
+echo "[5/6] Configuring environment..."
 if [ ! -f "$INSTALL_DIR/config.env" ]; then
   API_KEY=$(python3 -c 'import secrets; print(secrets.token_hex(16))')
   WEBHOOK_SECRET=$(python3 -c 'import secrets; print(secrets.token_hex(16))')
+
+  read -rp "Enter your cPanel domain (e.g. example.com, or press Enter to set later): " DOMAIN_INPUT
+  if [ -n "$DOMAIN_INPUT" ]; then
+    DOMAIN_INPUT="${DOMAIN_INPUT#https://}"
+    DOMAIN_INPUT="${DOMAIN_INPUT#http://}"
+    DOMAIN_INPUT="${DOMAIN_INPUT%%/*}"
+    WEBHOOK_URL="https://${DOMAIN_INPUT}/webhook_vps.php"
+  else
+    WEBHOOK_URL="https://YOUR-DOMAIN.COM/webhook_vps.php"
+  fi
+
   cat > "$INSTALL_DIR/config.env" <<EOF
 WORKER_PORT=8080
 API_KEY=$API_KEY
-CPANEL_WEBHOOK_URL=https://YOUR-DOMAIN.COM/webhook_vps.php
+CPANEL_WEBHOOK_URL=$WEBHOOK_URL
 WEBHOOK_SECRET=$WEBHOOK_SECRET
 MCC_DIR=$MCC_DIR
 INSTANCES_DIR=$INSTANCES_DIR
 SCRIPT_TEMPLATE=$INSTALL_DIR/DonutBotController.cs
 SERVER_HOST=donutsmp.net
 EOF
-  echo "Generated $INSTALL_DIR/config.env"
+else
+  echo "Existing config.env found, keeping your API keys."
 fi
 
-# 6. Install systemd service
-echo "[5/6] Creating systemd service..."
+# 6. Install & start systemd service
+echo "[6/6] Starting donut-worker systemd service..."
 cat > /etc/systemd/system/donut-worker.service <<EOF
 [Unit]
 Description=DonutSMP AFK MCC Worker API
@@ -91,19 +109,18 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable donut-worker
+systemctl enable donut-worker >/dev/null 2>&1
 systemctl restart donut-worker
 
-# Open firewall port if ufw is active
 if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
-  ufw allow 8080/tcp
+  ufw allow 8080/tcp >/dev/null 2>&1 || true
 fi
 
-echo "[6/6] Installation complete!"
-echo "------------------------------------------"
-echo "Important: Edit /opt/donut-afk/config.env and set CPANEL_WEBHOOK_URL,"
-echo "then run: systemctl restart donut-worker"
+PUBLIC_IP=$(curl -s --max-time 4 ifconfig.me || echo "YOUR_VPS_IP")
 echo ""
-echo "Your generated credentials (save these in Admin Panel Settings):"
-grep -E '^(API_KEY|WEBHOOK_SECRET|WORKER_PORT)=' "$INSTALL_DIR/config.env"
-echo "------------------------------------------"
+echo "=================================================="
+echo "  Installation Complete! Save these in cPanel:    "
+echo "=================================================="
+echo "VPS URL        : http://${PUBLIC_IP}:8080"
+grep -E '^(API_KEY|WEBHOOK_SECRET|CPANEL_WEBHOOK_URL)=' "$INSTALL_DIR/config.env"
+echo "=================================================="
