@@ -61,6 +61,7 @@ class ProxyConfig(BaseModel):
 
 class StartBotRequest(BaseModel):
     mc_username: str = "-"
+    server_host: Optional[str] = None
     proxy: Optional[ProxyConfig] = None
     auto_tp_accept: bool = False
     jump_interval: int = 0
@@ -144,10 +145,11 @@ def write_instance_files(bot: BotProcess, req: StartBotRequest):
     proxy = req.proxy or ProxyConfig()
     proxy_enabled = "true" if proxy.enabled and proxy.host and proxy.port else "false"
     login_name = req.mc_username if (req.mc_username and req.mc_username != "-") else f"acc_{bot.account_id}"
+    target_server = (req.server_host or "").strip() or SERVER_HOST
     ini_content = f"""[Main]
 [Main.General]
 Account = {{ Login = "{toml_escape(login_name)}", Password = "" }}
-Server = {{ Host = "{toml_escape(SERVER_HOST)}" }}
+Server = {{ Host = "{toml_escape(target_server)}" }}
 AccountType = "microsoft"
 Method = "mcc"
 
