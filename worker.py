@@ -285,8 +285,7 @@ async def read_mcc_output(bot: BotProcess):
             clean_tail = strip_ansi(buf).strip()
             if clean_tail and (
                 "Select a login method" in clean_tail
-                or "enter the code:" in clean_tail
-                or "microsoft.com/link" in clean_tail
+                or re.search(r"enter the code[:\s]+[A-Z0-9]{6,10}", clean_tail)
             ):
                 await process_line(clean_tail)
                 buf = ""
