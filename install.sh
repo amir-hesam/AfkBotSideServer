@@ -13,7 +13,8 @@ fi
 INSTALL_DIR="/opt/donut-afk"
 MCC_DIR="$INSTALL_DIR/mcc"
 INSTANCES_DIR="$INSTALL_DIR/instances"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || pwd)"
+REPO_RAW="${REPO_RAW:-https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main}"
 
 # 1. Create 2GB Swap if not present (critical for 1GB RAM VPS)
 if ! swapon --show | grep -q '/swapfile'; then
@@ -45,11 +46,15 @@ cd "$MCC_DIR"
 curl -fsSL https://mccteam.github.io/install.sh | sh
 chmod +x "$MCC_DIR"/* || true
 
-# 4. Copy worker files and strip CRLF
+# 4. Copy or download latest worker files and strip CRLF
 echo "[4/6] Setting up Python Worker API..."
-cp "$SCRIPT_DIR/worker.py" "$INSTALL_DIR/worker.py"
-cp "$SCRIPT_DIR/DonutBotController.cs" "$INSTALL_DIR/DonutBotController.cs"
-cp "$SCRIPT_DIR/requirements.txt" "$INSTALL_DIR/requirements.txt"
+for f in worker.py DonutBotController.cs requirements.txt; do
+  if [ -f "$SCRIPT_DIR/$f" ]; then
+    cp "$SCRIPT_DIR/$f" "$INSTALL_DIR/$f"
+  else
+    curl -fsSL "$REPO_RAW/$f" -o "$INSTALL_DIR/$f"
+  fi
+done
 sed -i 's/\r$//' "$INSTALL_DIR/worker.py" "$INSTALL_DIR/DonutBotController.cs" "$INSTALL_DIR/requirements.txt"
 
 if [ ! -d "$INSTALL_DIR/venv" ]; then
@@ -64,7 +69,11 @@ if [ ! -f "$INSTALL_DIR/config.env" ]; then
   API_KEY=$(python3 -c 'import secrets; print(secrets.token_hex(16))')
   WEBHOOK_SECRET=$(python3 -c 'import secrets; print(secrets.token_hex(16))')
 
-  read -rp "Enter your cPanel domain (e.g. example.com, or press Enter to set later): " DOMAIN_INPUT
+  if [ -e /dev/tty ]; then
+    read -rp "Enter your cPanel domain (e.g. example.com, or press Enter to set later): " DOMAIN_INPUT </dev/tty || DOMAIN_INPUT=""
+  else
+    DOMAIN_INPUT=""
+  fi
   if [ -n "$DOMAIN_INPUT" ]; then
     DOMAIN_INPUT="${DOMAIN_INPUT#https://}"
     DOMAIN_INPUT="${DOMAIN_INPUT#http://}"
