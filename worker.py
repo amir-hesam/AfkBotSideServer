@@ -62,6 +62,7 @@ class ProxyConfig(BaseModel):
 class StartBotRequest(BaseModel):
     mc_username: str = "-"
     server_host: Optional[str] = None
+    minecraft_version: Optional[str] = None
     proxy: Optional[ProxyConfig] = None
     auto_tp_accept: bool = False
     jump_interval: int = 0
@@ -146,6 +147,7 @@ def write_instance_files(bot: BotProcess, req: StartBotRequest):
     proxy_enabled = "true" if proxy.enabled and proxy.host and proxy.port else "false"
     login_name = req.mc_username if (req.mc_username and req.mc_username != "-") else f"acc_{bot.account_id}"
     target_server = (req.server_host or "").strip() or SERVER_HOST
+    mc_ver = (req.minecraft_version or "").strip() or "26.2"
     ini_content = f"""[Main]
 [Main.General]
 Account = {{ Login = "{toml_escape(login_name)}", Password = "" }}
@@ -156,7 +158,7 @@ Method = "mcc"
 [Main.Advanced]
 EnableSentry = false
 Language = "en_us"
-MinecraftVersion = "1.21.4"
+MinecraftVersion = "{toml_escape(mc_ver)}"
 BotOwners = []
 InternalCmdChar = "slash"
 TerrainAndMovements = true
@@ -242,7 +244,16 @@ async def read_mcc_output(bot: BotProcess):
                 )
             )
 
-        # 2. Online detection
+        # 2. Microsoft Auth completed & Online detection
+        if "Fetching profile key from Microsoft" in line or "Checking Session" in line:
+            bot.device_code = None
+            bot.device_url = None
+            if bot.status == "auth_pending":
+                bot.status = "connecting"
+            asyncio.create_task(
+                send_webhook({"account_id": bot.account_id, "event": "authenticated"})
+            )
+
         if "Server was successfully joined" in line or "You have joined" in line or "ChatBot initialized" in line:
             bot.status = "online"
             bot.device_code = None
