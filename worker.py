@@ -159,6 +159,7 @@ Method = "mcc"
 EnableSentry = false
 Language = "en_us"
 MinecraftVersion = "{toml_escape(mc_ver)}"
+BrandInfo = "vanilla"
 BotOwners = []
 InternalCmdChar = "slash"
 TerrainAndMovements = true
@@ -245,14 +246,16 @@ async def read_mcc_output(bot: BotProcess):
             )
 
         # 2. Microsoft Auth completed & Online detection
-        if "Fetching profile key from Microsoft" in line or "Checking Session" in line:
+        if "Fetching profile key from Microsoft" in line or "Checking Session" in line or "Cached profile key is still valid for" in line:
             bot.device_code = None
             bot.device_url = None
             if bot.status == "auth_pending":
                 bot.status = "connecting"
-            asyncio.create_task(
-                send_webhook({"account_id": bot.account_id, "event": "authenticated"})
-            )
+            mc_m = re.search(r"still valid for ([A-Za-z0-9_]{3,16})", line)
+            payload = {"account_id": bot.account_id, "event": "authenticated"}
+            if mc_m:
+                payload["mc_username"] = mc_m.group(1)
+            asyncio.create_task(send_webhook(payload))
 
         if "Server was successfully joined" in line or "You have joined" in line or "ChatBot initialized" in line:
             bot.status = "online"
