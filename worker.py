@@ -154,6 +154,7 @@ Method = "mcc"
 [Main.Advanced]
 EnableSentry = false
 Language = "en_us"
+MinecraftVersion = "1.21.4"
 BotOwners = []
 InternalCmdChar = "slash"
 TerrainAndMovements = true
